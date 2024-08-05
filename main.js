@@ -4,8 +4,9 @@ import {
   ColumnType,
   getChartContext,
   ChartToTSEvent,
+  TSToChartEvent,
 } from '@thoughtspot/ts-chart-sdk';
-import _ from 'lodash';
+import _, { range } from 'lodash';
 import Plotly from 'plotly.js-dist';
 
 function getDataForColumn(column, dataArr) {
@@ -16,6 +17,10 @@ function getDataForColumn(column, dataArr) {
   const data = _.map(dataArr.dataValue, (row) => row[idx]);
   return data;
 }
+//this is to keep track of initital render
+// TODO there might be a better way to do this with plotly
+
+let plotInitial = 1;
 
 const getDataModel = (chartModel) => {
   const columns = chartModel.columns;
@@ -61,13 +66,41 @@ async function render(ctx) {
   };
 
   var data = [trace1, trace2];
+  const layout1 = JSON.parse(
+    ctx.getChartModel()?.visualProps?.clientState || '{}'
+  );
+  if (plotInitial) {
+    Plotly.newPlot('app', data, layout1);
 
-  Plotly.newPlot('app', data);
+    const myPlot = document.getElementById('app');
+
+    myPlot.on('plotly_relayout', (eventData, eventData2) => {
+      console.log('renderCount');
+      let localState = {};
+      Object.keys(eventData).forEach((key) => {
+        const cur = key.split('.')[0];
+
+        if (!localState[cur]) {
+          localState[cur] = {
+            range: [eventData[key]],
+          };
+        } else {
+          localState[cur]['range'].push(eventData[key]);
+        }
+      });
+      ctx.emitEvent(ChartToTSEvent.UpdateVisualProps, {
+        visualProps: {
+          ...ctx.getChartModel()?.visualProps,
+          clientState: JSON.stringify(localState),
+        },
+      });
+    });
+    plotInitial = 0;
+  }
 }
 
 const renderChart = (ctx) => {
   try {
-    console.log('Inside renderChart');
     ctx.emitEvent(ChartToTSEvent.RenderStart);
     render(ctx);
   } catch (e) {
@@ -138,7 +171,6 @@ const init = async () => {
     },
     renderChart: (ctx) => renderChart(ctx),
     chartConfigEditorDefinition: (currentChartConfig, ctx) => {
-      debugger;
       const { config } = currentChartConfig;
 
       const yColumns = config?.chartConfig?.[0]?.dimensions.find(
